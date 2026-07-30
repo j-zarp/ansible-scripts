@@ -81,6 +81,28 @@ ok "Inventory file"
 # Extract timezone
 TIMEZONE=$(cat "$AUDIT_DIR/system/timezone.txt" 2>/dev/null | grep "Time zone:" | awk '{print $3}' || echo "Europe/Zurich")
 
+# Extract network info from audit
+STATIC_IP=""
+STATIC_GW=""
+STATIC_IFACE=""
+STATIC_DNS="1.1.1.1"
+
+if [[ -f "$AUDIT_DIR/network/ip-addr.txt" ]]; then
+    # Find the first non-loopback interface with a global IP
+    STATIC_IFACE=$(awk '/^[0-9]+:/ && !/lo:/ {iface=$2; gsub(/:$/,"",iface)} /inet / && /scope global/ {print iface; exit}' \
+        "$AUDIT_DIR/network/ip-addr.txt" 2>/dev/null)
+    STATIC_IP=$(awk '/inet / && /scope global/ {print $2; exit}' \
+        "$AUDIT_DIR/network/ip-addr.txt" 2>/dev/null)
+fi
+if [[ -f "$AUDIT_DIR/network/ip-route.txt" ]]; then
+    STATIC_GW=$(awk '/^default via/ {print $3; exit}' \
+        "$AUDIT_DIR/network/ip-route.txt" 2>/dev/null)
+fi
+if [[ -f "$AUDIT_DIR/network/resolv.conf" ]]; then
+    STATIC_DNS=$(awk '/^nameserver/ {printf "\"%s\", ", $2}' \
+        "$AUDIT_DIR/network/resolv.conf" 2>/dev/null | sed 's/, $//')
+fi
+
 # Extract hostname
 cat > "$PROJECT/group_vars/rebuild.yml" <<EOF
 ---
@@ -113,6 +135,23 @@ deploy_old_sudoers: false
 # Leave OFF until you've manually reviewed it, then opt in on a SECOND run
 # after verifying everything else works.
 deploy_old_sshd_config: false
+
+# ─── STATIC IP (extracted from old server) ──────────────────────────────────
+# Set deploy_static_ip to true once you've verified these values match the
+# NEW server's network. The config is written to disk but NOT activated
+# automatically — reboot or run 'systemctl restart networking' from the
+# provider console when ready.
+deploy_static_ip: false
+static_interface: "${STATIC_IFACE:-ens3}"
+static_ip: "${STATIC_IP:-203.0.113.42/24}"
+static_gateway: "${STATIC_GW:-203.0.113.1}"
+static_dns:
+$(echo "$STATIC_DNS" | tr ',' '\n' | sed 's/^ *//; s/ *$//; s/^"//; s/"$//; /^$/d' | awk '{printf "  - \"%s\"\n", $0}')
+
+# ─── DOTFILES ───────────────────────────────────────────────────────────────
+# Deploy .bashrc, .vimrc, etc. from the old server. Safe — only overwrites
+# dotfiles, never touches system config.
+deploy_dotfiles: true
 
 # VPN choice — set to 'wireguard' to switch from OpenVPN
 vpn_backend: "openvpn"   # or "wireguard"
@@ -292,6 +331,34 @@ cat > "$PROJECT/roles/users/tasks/main.yml" <<EOF
     - deploy_old_sudoers | bool
     # Belt-and-braces: even if opted in, refuse to overwrite cloud-init's file
     - (item | basename) != "90-cloud-init-users"
+
+# ─── DOTFILES ─────────────────────────────────────────────────────────────
+# Deploy .bashrc, .vimrc, etc. from the old server.
+- name: Find dotfile directories in role
+  ansible.builtin.find:
+    paths: "{{ role_path }}/files/dotfiles"
+    file_type: directory
+  register: dotfile_user_dirs
+  when: deploy_dotfiles | bool
+  failed_when: false
+
+- name: Deploy dotfiles for each user
+  ansible.builtin.copy:
+    src: "dotfiles/{{ item.1 }}/{{ item.0 }}"
+    dest: "{{ '/root' if item.1 == 'root' else '/home/' ~ item.1 }}/{{ item.0 }}"
+    owner: "{{ item.1 }}"
+    mode: "0644"
+  loop: >-
+    {{
+      ['.bashrc', '.vimrc', '.bash_aliases', '.profile',
+       '.tmux.conf', '.gitconfig', '.inputrc', '.nanorc']
+      | product(dotfile_user_dirs.files | default([]) | map(attribute='path') | map('basename') | list)
+      | list
+    }}
+  when:
+    - deploy_dotfiles | bool
+    - dotfile_user_dirs.files | default([]) | length > 0
+  failed_when: false   # skip silently if a dotfile doesn't exist for a user
 EOF
 
 # Copy sudoers.d files
@@ -303,6 +370,15 @@ fi
 # Copy sshd_config as template
 if [[ -f "$AUDIT_DIR/users/sshd_config" ]]; then
     cp "$AUDIT_DIR/users/sshd_config" "$PROJECT/roles/users/templates/sshd_config.j2"
+fi
+
+# Copy dotfiles from audit
+if [[ -d "$AUDIT_DIR/users/dotfiles" ]]; then
+    mkdir -p "$PROJECT/roles/users/files/dotfiles"
+    cp -a "$AUDIT_DIR/users/dotfiles"/* "$PROJECT/roles/users/files/dotfiles/" 2>/dev/null || true
+    ok "Copied dotfiles for: $(ls "$AUDIT_DIR/users/dotfiles/" 2>/dev/null | tr '\n' ' ')"
+else
+    warn "No dotfiles found in audit — re-run server-audit.sh to collect them"
 fi
 
 cat > "$PROJECT/roles/users/handlers/main.yml" <<EOF
@@ -349,20 +425,42 @@ cat > "$PROJECT/roles/networking/tasks/main.yml" <<EOF
     group: root
     mode: "0644"
   notify: Restart networking
-  when: "'interfaces.j2' is file"
+  when:
+    - "'interfaces.j2' is file"
+    - not (deploy_static_ip | bool)
 
-# If using netplan instead, uncomment:
-# - name: Deploy netplan config
-#   ansible.builtin.template:
-#     src: "01-netcfg.yaml.j2"
-#     dest: /etc/netplan/01-netcfg.yaml
-#     mode: "0600"
-#   notify: Apply netplan
+# ── Static IP deployment ─────────────────────────────────────────────────
+# Writes the config to disk but does NOT restart networking.
+# Apply manually from the VPS console or reboot when ready.
+- name: Deploy static IP configuration
+  ansible.builtin.template:
+    src: static-interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: "0644"
+    backup: yes
+  when: deploy_static_ip | bool
+  # No handler — deliberately not auto-restarting networking.
+  # A wrong IP/gateway = instant lockout.
 
-# NOTE: Review IP addresses — the new server likely has different IPs.
-# Parameterise them in group_vars/rebuild.yml:
-#   server_ip: "192.168.1.100"
-#   server_gateway: "192.168.1.1"
+- name: Deploy static DNS (resolv.conf)
+  ansible.builtin.template:
+    src: static-resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: deploy_static_ip | bool
+
+- name: Remind to activate static IP manually
+  ansible.builtin.debug:
+    msg: |
+      Static IP config written to /etc/network/interfaces but NOT activated.
+      To activate: reboot, or from the VPS console run:
+        systemctl restart networking
+      Verify with: ip addr show {{ static_interface }}
+  when: deploy_static_ip | bool
 EOF
 
 cat > "$PROJECT/roles/networking/handlers/main.yml" <<EOF
@@ -375,6 +473,29 @@ cat > "$PROJECT/roles/networking/handlers/main.yml" <<EOF
 - name: Apply netplan
   ansible.builtin.command: netplan apply
 EOF
+
+# Create static IP templates
+cat > "$PROJECT/roles/networking/templates/static-interfaces.j2" <<'TMPL'
+# {{ ansible_managed }}
+# Static IP configuration — deployed by Ansible.
+# To activate: systemctl restart networking (or reboot).
+
+auto lo
+iface lo inet loopback
+
+auto {{ static_interface }}
+iface {{ static_interface }} inet static
+    address {{ static_ip }}
+    gateway {{ static_gateway }}
+    dns-nameservers {{ static_dns | join(' ') }}
+TMPL
+
+cat > "$PROJECT/roles/networking/templates/static-resolv.conf.j2" <<'TMPL'
+# {{ ansible_managed }}
+{% for ns in static_dns %}
+nameserver {{ ns }}
+{% endfor %}
+TMPL
 
 # Copy hosts file as template
 if [[ -f "$AUDIT_DIR/network/hosts.txt" ]]; then
@@ -545,21 +666,38 @@ info "Generating role: docker ..."
 # Collect compose file paths
 COMPOSE_FILES=""
 if [[ -d "$AUDIT_DIR/docker/compose-files" ]]; then
-    for f in "$AUDIT_DIR"/docker/compose-files/*; do
-        [[ -f "$f" ]] || continue
-        # Reconstruct original path from audit slug:
-        #   "root_mnt_docker_piwigo_docker-compose.yml" → "/root/mnt/docker/piwigo"
-        original=$(basename "$f" | sed 's/^_//; s/_/\//g')
-        dir=$(dirname "/$original")
-        COMPOSE_FILES+="  - ${dir}
+    if [[ -f "$AUDIT_DIR/docker/compose-files/MANIFEST.txt" ]]; then
+        # ── Modern path: read original paths from MANIFEST.txt ────────────
+        # This is exact — no lossy slug reversal needed.
+        while IFS= read -r compose_path; do
+            [[ -z "$compose_path" ]] && continue
+            dir=$(dirname "$compose_path")
+            COMPOSE_FILES+="  - ${dir}
 "
-        # The task copies via:
-        #   src: "{{ item | regex_replace('/', '_') }}.yml"
-        # For item=/root/mnt/docker/piwigo, that's "_root_mnt_docker_piwigo.yml"
-        # — so we rename the file here to match exactly.
-        dest_slug="$(echo "$dir" | tr '/' '_').yml"
-        cp "$f" "$PROJECT/roles/docker/files/$dest_slug"
-    done
+            # Name the file to match the task's regex_replace('/', '_') lookup
+            dest_slug="$(echo "$dir" | tr '/' '_').yml"
+            # Find the corresponding audit file (slug of the full path)
+            audit_slug=$(echo "$compose_path" | tr '/' '_' | sed 's/^_//')
+            if [[ -f "$AUDIT_DIR/docker/compose-files/$audit_slug" ]]; then
+                cp "$AUDIT_DIR/docker/compose-files/$audit_slug" \
+                   "$PROJECT/roles/docker/files/$dest_slug"
+            fi
+        done < "$AUDIT_DIR/docker/compose-files/MANIFEST.txt"
+    else
+        # ── Legacy fallback: reverse-engineer paths from slugs ────────────
+        # WARNING: this is lossy if original paths contained underscores.
+        warn "No MANIFEST.txt found — re-run server-audit.sh for reliable paths"
+        for f in "$AUDIT_DIR"/docker/compose-files/*; do
+            [[ -f "$f" ]] || continue
+            [[ "$(basename "$f")" == "MANIFEST.txt" ]] && continue
+            original=$(basename "$f" | sed 's/^_//; s/_/\//g')
+            dir=$(dirname "/$original")
+            COMPOSE_FILES+="  - ${dir}
+"
+            dest_slug="$(echo "$dir" | tr '/' '_').yml"
+            cp "$f" "$PROJECT/roles/docker/files/$dest_slug"
+        done
+    fi
 fi
 
 cat > "$PROJECT/roles/docker/defaults/main.yml" <<EOF
@@ -671,7 +809,7 @@ cat > "$PROJECT/roles/docker/tasks/main.yml" <<EOF
       loop: "{{ docker_compose_dirs }}"
       register: existing_compose
 
-    - name: Deploy compose file from role (only if not already present)
+    - name: Deploy compose file from role (only if not already present on disk)
       ansible.builtin.copy:
         src: "{{ item.item | regex_replace('/', '_') }}.yml"
         dest: "{{ item.item }}/docker-compose.yml"
@@ -680,7 +818,19 @@ cat > "$PROJECT/roles/docker/tasks/main.yml" <<EOF
         mode: "0644"
       loop: "{{ existing_compose.results }}"
       when: not item.stat.exists
-      failed_when: false   # don't abort if the source file is absent
+      register: compose_copy
+      ignore_errors: true
+
+    - name: Warn about compose files that failed to copy
+      ansible.builtin.debug:
+        msg: >-
+          Could not deploy compose file for {{ item.item.item }}.
+          Expected source: roles/docker/files/{{ item.item.item | regex_replace('/', '_') }}.yml —
+          either regenerate the project or rsync from the old server.
+      loop: "{{ compose_copy.results | default([]) }}"
+      when:
+        - item is not skipped
+        - item is failed
 
     - name: Re-check for compose files after deploy attempt
       ansible.builtin.stat:

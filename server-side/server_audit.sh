@@ -153,18 +153,20 @@ while IFS=: read -r user _ uid _ _ home _; do
     fi
 done < /etc/passwd
 
-# Collect dotfiles
+# Collect dotfiles for every real user
 info "Collecting dotfiles ..."
 mkdir -p "$OUTDIR/users/dotfiles"
 while IFS=: read -r user _ uid _ _ home _; do
     if [[ $uid -ge 1000 || "$user" == "root" ]]; then
-        for dotfile in .bashrc .vimrc .bash_aliases .profile .tmux.conf .gitconfig; do
+        user_has_dotfiles=false
+        for dotfile in .bashrc .vimrc .bash_aliases .profile .tmux.conf .gitconfig .inputrc .nanorc; do
             if [[ -f "$home/$dotfile" ]]; then
                 mkdir -p "$OUTDIR/users/dotfiles/$user"
                 cp "$home/$dotfile" "$OUTDIR/users/dotfiles/$user/$dotfile"
+                user_has_dotfiles=true
             fi
         done
-        [[ -d "$OUTDIR/users/dotfiles/$user" ]] && ok "  $user dotfiles"
+        $user_has_dotfiles && ok "  $user → dotfiles"
     fi
 done < /etc/passwd
 
@@ -292,12 +294,17 @@ if command -v docker &>/dev/null; then
     # Find docker-compose files
     info "Searching for docker-compose files ..."
     mkdir -p "$OUTDIR/docker/compose-files"
+    # Clear any previous manifest
+    : > "$OUTDIR/docker/compose-files/MANIFEST.txt"
     find / -maxdepth 5 \( -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \
         -o -name 'compose.yml' -o -name 'compose.yaml' \) \
         -not -path '*/proc/*' -not -path '*/sys/*' 2>/dev/null | while read -r f; do
         # Preserve directory structure hint in filename
         slug=$(echo "$f" | tr '/' '_' | sed 's/^_//')
         cp "$f" "$OUTDIR/docker/compose-files/$slug"
+        # Save the original path so the generator doesn't have to reverse
+        # the slug (which is lossy when paths contain underscores).
+        echo "$f" >> "$OUTDIR/docker/compose-files/MANIFEST.txt"
         ok "  Found $f"
     done
 

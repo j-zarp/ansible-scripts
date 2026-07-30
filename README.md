@@ -153,7 +153,11 @@ This toolkit is designed to never lock you out of a remote server.
 **Dangerous operations require explicit opt-in:**
 - `deploy_old_sudoers: false` (default) — the old server's `/etc/sudoers.d/` files are NOT deployed. Cloud-init's `90-cloud-init-users` is never overwritten even when opted in.
 - `deploy_old_sshd_config: false` (default) — the old server's `sshd_config` is NOT deployed. When opted in, a backup is created automatically.
+- `deploy_static_ip: false` (default) — static IP config is NOT written. When opted in, the config is written to disk but networking is NOT restarted automatically. You activate it manually from the VPS console or by rebooting.
 - `docker_start_services: false` (default) — compose files are copied but containers are not started until you explicitly enable it.
+
+**Safe by default:**
+- `deploy_dotfiles: true` (default) — `.bashrc`, `.vimrc`, etc. from the old server are deployed. This is safe because it only touches user dotfiles, not system configuration.
 
 **Pre-flight checks:**
 - The playbook verifies the target is Debian before making any changes
@@ -203,6 +207,57 @@ Set `vpn_backend: "wireguard"` in `group_vars/rebuild.yml`. The VPN role will:
 Your old OpenVPN configs are preserved in `roles/vpn/files/openvpn-old/` for reference. See `roles/vpn/files/wireguard-migration-notes.txt` for the directive-by-directive mapping.
 
 All clients will need new WireGuard config files — there's no certificate reuse between OpenVPN and WireGuard.
+
+## Static IP configuration
+
+The generator auto-extracts the old server's IP, gateway, interface, and DNS servers from the audit and populates `group_vars/rebuild.yml`. Review and adjust the values for the new server, then opt in:
+
+```yaml
+# In group_vars/rebuild.yml:
+deploy_static_ip: true
+static_interface: "ens3"
+static_ip: "203.0.113.42/24"
+static_gateway: "203.0.113.1"
+static_dns:
+  - "1.1.1.1"
+  - "9.9.9.9"
+```
+
+The playbook writes `/etc/network/interfaces` but deliberately does NOT restart networking (a wrong IP = instant SSH lockout). Activate it manually:
+
+```bash
+# From the VPS provider's web console:
+systemctl restart networking
+ip addr show ens3   # verify
+
+# Or simply reboot:
+reboot
+```
+
+## Dotfiles
+
+The audit script collects `.bashrc`, `.vimrc`, `.bash_aliases`, `.profile`, `.tmux.conf`, `.gitconfig`, `.inputrc`, and `.nanorc` for every user (including root). The generator places them in `roles/users/files/dotfiles/<username>/` and the playbook deploys them.
+
+Enabled by default (`deploy_dotfiles: true`) since dotfiles don't affect system security. Disable with:
+
+```yaml
+deploy_dotfiles: false
+```
+
+After generation, the dotfiles directory looks like:
+
+```
+roles/users/files/dotfiles/
+├── root/
+│   ├── .bashrc
+│   └── .vimrc
+└── nuc/
+    ├── .bashrc
+    ├── .vimrc
+    └── .bash_aliases
+```
+
+You can edit these files before deployment to customize your new server's shell environment.
 
 ## Debian 12 → 13 gotchas
 
