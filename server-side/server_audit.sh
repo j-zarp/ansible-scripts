@@ -153,6 +153,21 @@ while IFS=: read -r user _ uid _ _ home _; do
     fi
 done < /etc/passwd
 
+# Collect dotfiles
+info "Collecting dotfiles ..."
+mkdir -p "$OUTDIR/users/dotfiles"
+while IFS=: read -r user _ uid _ _ home _; do
+    if [[ $uid -ge 1000 || "$user" == "root" ]]; then
+        for dotfile in .bashrc .vimrc .bash_aliases .profile .tmux.conf .gitconfig; do
+            if [[ -f "$home/$dotfile" ]]; then
+                mkdir -p "$OUTDIR/users/dotfiles/$user"
+                cp "$home/$dotfile" "$OUTDIR/users/dotfiles/$user/$dotfile"
+            fi
+        done
+        [[ -d "$OUTDIR/users/dotfiles/$user" ]] && ok "  $user dotfiles"
+    fi
+done < /etc/passwd
+
 # ============================================================================
 #  4. NETWORK CONFIGURATION
 # ============================================================================
