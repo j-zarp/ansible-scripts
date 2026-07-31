@@ -47,6 +47,7 @@ collect() {
     info "Collecting $label ..."
     mkdir -p "$(dirname "$OUTDIR/$outfile")"
     if "$@" > "$OUTDIR/$outfile" 2>/dev/null; then
+        sed -i 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$OUTDIR/$outfile"
         ok "$label → $outfile"
     else
         warn "$label — command failed or not available"
@@ -175,7 +176,7 @@ done < /etc/passwd
 # ============================================================================
 banner "4/12 — Network Configuration"
 
-collect "ip addresses"      "network/ip-addr.txt"           ip -c addr
+collect "ip addresses"      "network/ip-addr.txt"           ip addr
 collect "ip routes"         "network/ip-route.txt"          ip route
 collect "ip rules"          "network/ip-rule.txt"           ip rule
 collect "DNS resolv.conf"   "network/resolv.conf"           cat /etc/resolv.conf
