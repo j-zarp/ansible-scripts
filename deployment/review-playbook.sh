@@ -127,7 +127,7 @@ if [[ -f roles/users/defaults/main.yml ]]; then
 fi
 
 subsect "SSH authorized_keys to deploy"
-for f in roles/users/files/*_authorized_keys 2>/dev/null; do
+for f in roles/users/files/*_authorized_keys; do
     [[ -f "$f" ]] || continue
     user=$(basename "$f" | sed 's/_authorized_keys//')
     keys=$(wc -l < "$f")
@@ -173,7 +173,7 @@ if [[ -f roles/docker/defaults/main.yml ]]; then
 fi
 
 subsect "Compose files available in role"
-for f in roles/docker/files/*.yml 2>/dev/null; do
+for f in roles/docker/files/*.yml; do
     [[ -f "$f" ]] || continue
     show "$(basename "$f")"
 done
