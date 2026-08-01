@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  generate-ansible.sh — Turn audit output into an Ansible project
+#  generate-ansible.sh -- Turn audit output into an Ansible project
 #                        Run this file with an output of server_audit.sh
 # ============================================================================
 #  Run on your WORKSTATION (not the remote server).
@@ -1020,10 +1020,17 @@ cat > "$PROJECT/roles/vpn/tasks/wireguard.yml" <<EOF
         mode: "0600"
       when: wg_server_privkey.changed
 
-    - name: Derive server public key
-      ansible.builtin.shell: cat /etc/wireguard/server_private.key | wg pubkey
-      register: wg_server_pubkey
-      changed_when: false
+    # Read the key back from the TARGET (works whether it was just generated
+    # or already existed from a previous run). Runs on the target, not the
+    # controller — unlike lookup('file', ...) which reads the controller.
+    - name: Read server private key from target
+      ansible.builtin.slurp:
+        src: /etc/wireguard/server_private.key
+      register: wg_privkey_slurped
+
+    - name: Set private key fact
+      ansible.builtin.set_fact:
+        wg_server_private_key: "{{ wg_privkey_slurped.content | b64decode | trim }}"
 
     - name: Deploy WireGuard config
       ansible.builtin.template:
@@ -1057,9 +1064,9 @@ cat > "$PROJECT/roles/vpn/templates/wg0.conf.j2" <<'EOF'
 [Interface]
 Address    = {{ wireguard_address }}
 ListenPort = {{ wireguard_port }}
-PrivateKey = {{ lookup('file', '/etc/wireguard/server_private.key') }}
-PostUp     = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-PostDown   = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+PrivateKey = {{ wg_server_private_key }}
+PostUp     = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o {{ wireguard_egress_interface | default('eth0') }} -j MASQUERADE
+PostDown   = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o {{ wireguard_egress_interface | default('eth0') }} -j MASQUERADE
 
 # Peers are added by the client key generation tasks
 # or manually with:  wg set wg0 peer <PUBKEY> allowed-ips 10.8.0.X/32
