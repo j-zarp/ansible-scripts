@@ -924,8 +924,7 @@ wireguard_port: 51820
 wireguard_interface: "wg0"
 
 # Clients to create (${CLIENT_COUNT} found on old server):
-vpn_clients:
-${CLIENTS:-    # No clients extracted -- add manually}
+$(if [[ -n "$CLIENTS" ]]; then echo "vpn_clients:"; echo "$CLIENTS"; else echo "vpn_clients: []   # No clients extracted -- add names here to auto-generate keys"; fi)
 EOF
 
 cat > "$PROJECT/roles/vpn/tasks/main.yml" <<EOF
@@ -1054,7 +1053,7 @@ cat > "$PROJECT/roles/vpn/tasks/wireguard.yml" <<EOF
         chmod 600 /etc/wireguard/clients/{{ item }}/private.key
       args:
         creates: "/etc/wireguard/clients/{{ item }}/private.key"
-      loop: "{{ vpn_clients }}"
+      loop: "{{ vpn_clients | default([]) }}"
 EOF
 
 # Create template files
