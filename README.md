@@ -154,7 +154,7 @@ This toolkit is designed to never lock you out of a remote server.
 - `deploy_old_sudoers: false` (default) — the old server's `/etc/sudoers.d/` files are NOT deployed. Cloud-init's `90-cloud-init-users` is never overwritten even when opted in.
 - `deploy_old_sshd_config: false` (default) — the old server's `sshd_config` is NOT deployed. When opted in, a backup is created automatically.
 - `deploy_static_ip: false` (default) — static IP config is NOT written. When opted in, the config is written to disk but networking is NOT restarted automatically. You activate it manually from the VPS console or by rebooting.
-- `docker_start_services: false` (default) — compose files are copied but containers are not started until you explicitly enable it.
+- `docker_start_services: false` (default) — compose files are copied but containers are not started until you explicitly enable it. This is deliberate: services often have start-order dependencies (e.g. a reverse proxy must create the shared network before other services join it) and data volumes usually need to be rsynced from the old server first. Bring services up manually in the right order, or create a shared external network so order doesn't matter.
 
 **Safe by default:**
 - `deploy_dotfiles: true` (default) — `.bashrc`, `.vimrc`, etc. from the old server are deployed. This is safe because it only touches user dotfiles, not system configuration.

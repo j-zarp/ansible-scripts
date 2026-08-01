@@ -25,7 +25,7 @@ info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
 ok()    { printf "${GREEN}[ OK ]${NC}  %s\n" "$*"; }
 warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 
-# ── Validate input ──────────────────────────────────────────────────────────
+# -- Validate input ----------------------------------------------------------
 
 AUDIT_DIR="${1:?Usage: $0 <path-to-audit-directory>}"
 
@@ -44,7 +44,7 @@ info "Audit source: $AUDIT_DIR"
 info "Ansible project will be created in: $PROJECT"
 echo ""
 
-# ── Scaffold directory structure ────────────────────────────────────────────
+# -- Scaffold directory structure --------------------------------------------
 
 mkdir -p "$PROJECT"/{inventory,group_vars,roles/{base-packages,networking,firewall,docker,vpn,cron,users,security}/{tasks,templates,files,handlers,defaults}}
 
@@ -59,7 +59,7 @@ AUDIT_HOSTNAME_SHORT=$(echo "$AUDIT_HOSTNAME" | cut -d. -f1)
 
 cat > "$PROJECT/inventory/hosts.ini" <<EOF
 # ============================================================================
-# Inventory — edit the IP/hostname below to point at your new Debian 13 box
+# Inventory -- edit the IP/hostname below to point at your new Debian 13 box
 # ============================================================================
 
 [rebuild]
@@ -115,7 +115,7 @@ cat > "$PROJECT/group_vars/rebuild.yml" <<EOF
 server_hostname: "${AUDIT_HOSTNAME}"
 server_timezone: "${TIMEZONE}"
 
-# ─── LOCKOUT PROTECTION ─────────────────────────────────────────────────────
+# --- LOCKOUT PROTECTION -----------------------------------------------------
 # The user Ansible connects as. This user is guaranteed to keep:
 #   - sudo group membership
 #   - their existing SSH authorized_keys (never wiped)
@@ -123,7 +123,7 @@ server_timezone: "${TIMEZONE}"
 # Defaults to ansible_user from inventory.
 bootstrap_user: "{{ ansible_user }}"
 
-# ─── DANGEROUS — REQUIRES EXPLICIT OPT-IN ──────────────────────────────────
+# --- DANGEROUS -- REQUIRES EXPLICIT OPT-IN ----------------------------------
 # Deploying the old server's /etc/sudoers.d/* can overwrite cloud-init's
 # 90-cloud-init-users grant on a fresh VPS and lock you out. Leave OFF
 # until you've manually reviewed roles/users/files/sudoers.d/ and confirmed
@@ -131,15 +131,15 @@ bootstrap_user: "{{ ansible_user }}"
 deploy_old_sudoers: false
 
 # Deploying the old server's sshd_config can disable PasswordAuth, disable
-# RootLogin, set AllowUsers, etc. — any of which can lock you out of SSH.
+# RootLogin, set AllowUsers, etc. -- any of which can lock you out of SSH.
 # Leave OFF until you've manually reviewed it, then opt in on a SECOND run
 # after verifying everything else works.
 deploy_old_sshd_config: false
 
-# ─── STATIC IP (extracted from old server) ──────────────────────────────────
+# --- STATIC IP (extracted from old server) ----------------------------------
 # Set deploy_static_ip to true once you've verified these values match the
 # NEW server's network. The config is written to disk but NOT activated
-# automatically — reboot or run 'systemctl restart networking' from the
+# automatically -- reboot or run 'systemctl restart networking' from the
 # provider console when ready.
 deploy_static_ip: false
 static_interface: "${STATIC_IFACE:-ens3}"
@@ -148,12 +148,12 @@ static_gateway: "${STATIC_GW:-203.0.113.1}"
 static_dns:
 $(echo "$STATIC_DNS" | tr ',' '\n' | sed 's/^ *//; s/ *$//; s/^"//; s/"$//; /^$/d' | awk '{printf "  - \"%s\"\n", $0}')
 
-# ─── DOTFILES ───────────────────────────────────────────────────────────────
-# Deploy .bashrc, .vimrc, etc. from the old server. Safe — only overwrites
+# --- DOTFILES ---------------------------------------------------------------
+# Deploy .bashrc, .vimrc, etc. from the old server. Safe -- only overwrites
 # dotfiles, never touches system config.
 deploy_dotfiles: true
 
-# VPN choice — set to 'wireguard' to switch from OpenVPN
+# VPN choice -- set to 'wireguard' to switch from OpenVPN
 vpn_backend: "openvpn"   # or "wireguard"
 
 # Docker compose project directories are auto-populated in
@@ -183,12 +183,12 @@ if [[ -f "$AUDIT_DIR/packages/apt-manual.txt" ]]; then
 
     PACKAGES=$(grep -vE "$FILTER_RE" "$AUDIT_DIR/packages/apt-manual.txt" | sort | awk '{printf "    - %s\n", $1}')
 else
-    PACKAGES="    # Could not find apt-manual.txt in audit — add packages manually"
+    PACKAGES="    # Could not find apt-manual.txt in audit -- add packages manually"
 fi
 
 cat > "$PROJECT/roles/base-packages/defaults/main.yml" <<EOF
 ---
-# Packages to install — sourced from 'apt-mark showmanual' on the old server.
+# Packages to install -- sourced from 'apt-mark showmanual' on the old server.
 # Review this list: remove anything Debian 13 provides by default or that
 # you no longer need, and check for package renames between Debian 12 → 13.
 #
@@ -212,7 +212,7 @@ cat > "$PROJECT/roles/base-packages/tasks/main.yml" <<EOF
   ansible.builtin.apt:
     name: "{{ base_packages }}"
     state: present
-  # If a package was renamed/removed in Debian 13, this will fail clearly —
+  # If a package was renamed/removed in Debian 13, this will fail clearly --
   # fix the name in defaults/main.yml and re-run.
 
 - name: Set timezone
@@ -266,7 +266,7 @@ EOF
 
 cat > "$PROJECT/roles/users/tasks/main.yml" <<EOF
 ---
-# ─── LOCKOUT PROTECTION — runs FIRST, before anything else in this role ───
+# --- LOCKOUT PROTECTION -- runs FIRST, before anything else in this role ---
 # Guarantees the bootstrap user retains sudo access throughout the play.
 - name: "Lockout protection: ensure bootstrap user is in sudo group"
   ansible.builtin.user:
@@ -285,7 +285,7 @@ cat > "$PROJECT/roles/users/tasks/main.yml" <<EOF
 # The '00-' prefix ensures this file is read first by sudo. It only grants
 # the same access the user already has via the sudo group, so it's safe.
 
-# ─── Manage users from the audit ──────────────────────────────────────────
+# --- Manage users from the audit ------------------------------------------
 - name: Create managed users
   ansible.builtin.user:
     name: "{{ item.name }}"
@@ -314,7 +314,7 @@ cat > "$PROJECT/roles/users/tasks/main.yml" <<EOF
     - item.stat.exists
     - item.item.name != bootstrap_user   # never replace bootstrap user's keys
 
-# ─── DANGEROUS — opt-in only ──────────────────────────────────────────────
+# --- DANGEROUS -- opt-in only ----------------------------------------------
 # Deploying the old server's /etc/sudoers.d/* can overwrite cloud-init's
 # 90-cloud-init-users grant and lock you out. Defaults to off.
 - name: Deploy sudoers rules from old server
@@ -332,7 +332,7 @@ cat > "$PROJECT/roles/users/tasks/main.yml" <<EOF
     # Belt-and-braces: even if opted in, refuse to overwrite cloud-init's file
     - (item | basename) != "90-cloud-init-users"
 
-# ─── DOTFILES ─────────────────────────────────────────────────────────────
+# --- DOTFILES -------------------------------------------------------------
 # Deploy .bashrc, .vimrc, etc. from the old server.
 - name: Find dotfile directories in role
   ansible.builtin.find:
@@ -378,7 +378,7 @@ if [[ -d "$AUDIT_DIR/users/dotfiles" ]]; then
     cp -a "$AUDIT_DIR/users/dotfiles"/* "$PROJECT/roles/users/files/dotfiles/" 2>/dev/null || true
     ok "Copied dotfiles for: $(ls "$AUDIT_DIR/users/dotfiles/" 2>/dev/null | tr '\n' ' ')"
 else
-    warn "No dotfiles found in audit — re-run server-audit.sh to collect them"
+    warn "No dotfiles found in audit -- re-run server-audit.sh to collect them"
 fi
 
 cat > "$PROJECT/roles/users/handlers/main.yml" <<EOF
@@ -429,7 +429,7 @@ cat > "$PROJECT/roles/networking/tasks/main.yml" <<EOF
     - "'interfaces.j2' is file"
     - not (deploy_static_ip | bool)
 
-# ── Static IP deployment ─────────────────────────────────────────────────
+# -- Static IP deployment -------------------------------------------------
 # Writes the config to disk but does NOT restart networking.
 # Apply manually from the VPS console or reboot when ready.
 - name: Deploy static IP configuration
@@ -441,7 +441,7 @@ cat > "$PROJECT/roles/networking/tasks/main.yml" <<EOF
     mode: "0644"
     backup: yes
   when: deploy_static_ip | bool
-  # No handler — deliberately not auto-restarting networking.
+  # No handler -- deliberately not auto-restarting networking.
   # A wrong IP/gateway = instant lockout.
 
 - name: Deploy static DNS (resolv.conf)
@@ -477,7 +477,7 @@ EOF
 # Create static IP templates
 cat > "$PROJECT/roles/networking/templates/static-interfaces.j2" <<'TMPL'
 # {{ ansible_managed }}
-# Static IP configuration — deployed by Ansible.
+# Static IP configuration -- deployed by Ansible.
 # To activate: systemctl restart networking (or reboot).
 
 auto lo
@@ -525,7 +525,7 @@ if $HAS_UFW && [[ -f "$AUDIT_DIR/firewall/ufw-status.txt" ]]; then
     # UFW status output has columns separated by 2+ spaces, and the Action
     # column actually contains two words: ACTION + DIRECTION (e.g. "ALLOW IN").
     # We split on multi-space, then split the action field on the inner space.
-    # IPv6 rules (marked "(v6)") are skipped to avoid duplicates — UFW
+    # IPv6 rules (marked "(v6)") are skipped to avoid duplicates -- UFW
     # auto-creates IPv6 entries when you add an IPv4 rule.
     UFW_RULES=$(awk -F'  +' '
         /^--/ { found=1; next }
@@ -583,7 +583,7 @@ ufw_default_outgoing: "allow"
 
 # Rules extracted from old server
 ufw_rules:
-${UFW_RULES:-  # No UFW rules extracted — see firewall/ in audit for raw iptables rules}
+${UFW_RULES:-  # No UFW rules extracted -- see firewall/ in audit for raw iptables rules}
 EOF
 
 cat > "$PROJECT/roles/firewall/tasks/main.yml" <<EOF
@@ -667,8 +667,8 @@ info "Generating role: docker ..."
 COMPOSE_FILES=""
 if [[ -d "$AUDIT_DIR/docker/compose-files" ]]; then
     if [[ -f "$AUDIT_DIR/docker/compose-files/MANIFEST.txt" ]]; then
-        # ── Modern path: read original paths from MANIFEST.txt ────────────
-        # This is exact — no lossy slug reversal needed.
+        # -- Modern path: read original paths from MANIFEST.txt ------------
+        # This is exact -- no lossy slug reversal needed.
         while IFS= read -r compose_path; do
             [[ -z "$compose_path" ]] && continue
             dir=$(dirname "$compose_path")
@@ -684,9 +684,9 @@ if [[ -d "$AUDIT_DIR/docker/compose-files" ]]; then
             fi
         done < "$AUDIT_DIR/docker/compose-files/MANIFEST.txt"
     else
-        # ── Legacy fallback: reverse-engineer paths from slugs ────────────
+        # -- Legacy fallback: reverse-engineer paths from slugs ------------
         # WARNING: this is lossy if original paths contained underscores.
-        warn "No MANIFEST.txt found — re-run server-audit.sh for reliable paths"
+        warn "No MANIFEST.txt found -- re-run server-audit.sh for reliable paths"
         for f in "$AUDIT_DIR"/docker/compose-files/*; do
             [[ -f "$f" ]] || continue
             [[ "$(basename "$f")" == "MANIFEST.txt" ]] && continue
@@ -705,15 +705,26 @@ cat > "$PROJECT/roles/docker/defaults/main.yml" <<EOF
 # Docker compose directories found on the old server.
 # Update paths if you want to reorganise on the new machine.
 docker_compose_dirs:
-${COMPOSE_FILES:-  # No compose files found — check audit docker/inspect/ for container configs}
+${COMPOSE_FILES:-  # No compose files found -- check audit docker/inspect/ for container configs}
 
 # Docker daemon config (copy from files/daemon.json if customised)
 docker_custom_daemon_json: false
+
+# Whether to actually start the compose projects. Defaults to false so the
+# playbook only installs Docker and copies compose files into place --
+# it does NOT bring containers up. This is intentional: services often have
+# start-order dependencies (e.g. a reverse proxy must create the shared
+# network before other services join it), and data volumes usually need to
+# be rsynced from the old server first.
+#
+# To start services, either flip this to true here, or override at runtime:
+#   ansible-playbook site.yml --tags docker -e docker_start_services=true
+docker_start_services: false
 EOF
 
 cat > "$PROJECT/roles/docker/tasks/main.yml" <<EOF
 ---
-# ── Modern Debian 13 Docker install using deb822_repository ───────────────
+# -- Modern Debian 13 Docker install using deb822_repository ---------------
 # This avoids the deprecated apt-key utility and uses the structured
 # DEB822 sources format that Debian now recommends.
 
@@ -775,8 +786,8 @@ cat > "$PROJECT/roles/docker/tasks/main.yml" <<EOF
         state: started
         enabled: yes
 
-    # ── Compose projects ──────────────────────────────────────────────────
-    # IMPORTANT: a docker-compose.yml is not enough — most containers also
+    # -- Compose projects --------------------------------------------------
+    # IMPORTANT: a docker-compose.yml is not enough -- most containers also
     # need their bind-mounted data directories (databases, configs, app
     # state). Recommended workflow BEFORE running this playbook:
     #
@@ -825,7 +836,7 @@ cat > "$PROJECT/roles/docker/tasks/main.yml" <<EOF
       ansible.builtin.debug:
         msg: >-
           Could not deploy compose file for {{ item.item.item }}.
-          Expected source: roles/docker/files/{{ item.item.item | regex_replace('/', '_') }}.yml —
+          Expected source: roles/docker/files/{{ item.item.item | regex_replace('/', '_') }}.yml --
           either regenerate the project or rsync from the old server.
       loop: "{{ compose_copy.results | default([]) }}"
       when:
@@ -843,15 +854,21 @@ cat > "$PROJECT/roles/docker/tasks/main.yml" <<EOF
         project_src: "{{ item.item }}"
         state: present
       loop: "{{ compose_present.results }}"
-      when: item.stat.exists
+      when:
+        - item.stat.exists
+        - docker_start_services | bool
 
     - name: Summary of compose project status
       ansible.builtin.debug:
         msg: |
-          Compose projects:
+          Compose projects (docker_start_services = {{ docker_start_services }}):
           {% for r in compose_present.results %}
-          - {{ r.item }}: {{ 'STARTED' if r.stat.exists else 'SKIPPED (no compose file — rsync data first)' }}
+          - {{ r.item }}: {% if not r.stat.exists %}NO COMPOSE FILE (rsync data first){% elif docker_start_services | bool %}STARTED{% else %}file ready, NOT started{% endif %}
+
           {% endfor %}
+          {% if not (docker_start_services | bool) %}
+          To start services: ansible-playbook site.yml --tags docker -e docker_start_services=true
+          {% endif %}
 EOF
 
 cat > "$PROJECT/roles/docker/handlers/main.yml" <<EOF
@@ -893,22 +910,22 @@ fi
 
 cat > "$PROJECT/roles/vpn/defaults/main.yml" <<EOF
 ---
-# ── VPN backend ─────────────────────────────────────────────────────────────
+# -- VPN backend -------------------------------------------------------------
 # Set in group_vars/rebuild.yml:  vpn_backend: "openvpn" or "wireguard"
 
-# ── OpenVPN settings (from old server) ──────────────────────────────────────
+# -- OpenVPN settings (from old server) --------------------------------------
 openvpn_subnet: "${VPN_SUBNET:-10.8.0.0 255.255.255.0}"
 openvpn_port: ${VPN_PORT:-1194}
 openvpn_proto: "${VPN_PROTO:-udp}"
 
-# ── WireGuard settings (for migration) ──────────────────────────────────────
+# -- WireGuard settings (for migration) --------------------------------------
 wireguard_address: "10.8.0.1/24"        # Match your old VPN subnet
 wireguard_port: 51820
 wireguard_interface: "wg0"
 
 # Clients to create (${CLIENT_COUNT} found on old server):
 vpn_clients:
-${CLIENTS:-    # No clients extracted — add manually}
+${CLIENTS:-    # No clients extracted -- add manually}
 EOF
 
 cat > "$PROJECT/roles/vpn/tasks/main.yml" <<EOF
@@ -924,7 +941,7 @@ EOF
 
 cat > "$PROJECT/roles/vpn/tasks/openvpn.yml" <<EOF
 ---
-# ── OpenVPN: reproduce the old setup ────────────────────────────────────────
+# -- OpenVPN: reproduce the old setup ----------------------------------------
 
 - name: Install OpenVPN and Easy-RSA
   ansible.builtin.apt:
@@ -943,9 +960,9 @@ cat > "$PROJECT/roles/vpn/tasks/openvpn.yml" <<EOF
   notify: Restart OpenVPN
 
 # NOTE: You must also transfer or regenerate the PKI (CA, server cert, DH, ta.key).
-# Option A — copy from old server:
+# Option A -- copy from old server:
 #   scp -r old:/etc/openvpn/easy-rsa/pki /etc/openvpn/easy-rsa/pki
-# Option B — fresh PKI (all clients need new certs):
+# Option B -- fresh PKI (all clients need new certs):
 #   cd /etc/openvpn/easy-rsa && easyrsa init-pki && easyrsa build-ca ...
 
 - name: Enable IP forwarding
@@ -955,7 +972,7 @@ cat > "$PROJECT/roles/vpn/tasks/openvpn.yml" <<EOF
     sysctl_set: yes
     reload: yes
 
-# Service-level tasks need openvpn binaries — skip in --check mode.
+# Service-level tasks need openvpn binaries -- skip in --check mode.
 - name: Start OpenVPN (skip in --check mode)
   when: not ansible_check_mode
   block:
@@ -968,7 +985,7 @@ EOF
 
 cat > "$PROJECT/roles/vpn/tasks/wireguard.yml" <<EOF
 ---
-# ── WireGuard: fresh setup replacing OpenVPN ────────────────────────────────
+# -- WireGuard: fresh setup replacing OpenVPN --------------------------------
 
 - name: Install WireGuard
   ansible.builtin.apt:
@@ -984,7 +1001,7 @@ cat > "$PROJECT/roles/vpn/tasks/wireguard.yml" <<EOF
     sysctl_set: yes
     reload: yes
 
-# Tasks below need the wg binary — skip in --check mode.
+# Tasks below need the wg binary -- skip in --check mode.
 - name: Configure WireGuard (skip in --check mode)
   when: not ansible_check_mode
   block:
@@ -1111,7 +1128,7 @@ fi
 cat > "$PROJECT/roles/cron/tasks/main.yml" <<EOF
 ---
 # Cron jobs extracted from the old server.
-# Review each one — paths and scripts may need updating for the new server.
+# Review each one -- paths and scripts may need updating for the new server.
 ${CRON_TASKS:-
 # No user crontabs found. Check audit/cron/ for system crontabs (cron.d, etc.)
 # and add them here manually.}
@@ -1184,7 +1201,7 @@ cat > "$PROJECT/roles/security/tasks/main.yml" <<EOF
   notify: Restart fail2ban
   when: security_fail2ban
 
-# Tasks needing the fail2ban service unit on disk — skip in --check mode.
+# Tasks needing the fail2ban service unit on disk -- skip in --check mode.
 - name: Enable fail2ban (skip in --check mode)
   when:
     - security_fail2ban
@@ -1216,7 +1233,7 @@ cat > "$PROJECT/roles/security/tasks/main.yml" <<EOF
   loop: "{{ sysctl_settings | dict2items }}"
   when: sysctl_settings | length > 0
 
-# ─── DANGEROUS — opt-in only ──────────────────────────────────────────────
+# --- DANGEROUS -- opt-in only ----------------------------------------------
 # The old server's sshd_config may have:
 #   - AllowUsers directive that excludes your current bootstrap user
 #   - PasswordAuthentication no (you need keys working first)
@@ -1225,7 +1242,7 @@ cat > "$PROJECT/roles/security/tasks/main.yml" <<EOF
 # Any of these can lock you out instantly. Defaults to off; set
 # deploy_old_sshd_config: true in group_vars only after a successful first
 # run AND after manually reviewing roles/users/templates/sshd_config.j2.
-- name: Deploy hardened sshd_config (DANGEROUS — opt-in)
+- name: Deploy hardened sshd_config (DANGEROUS -- opt-in)
   ansible.builtin.template:
     src: sshd_config.j2
     dest: /etc/ssh/sshd_config
@@ -1278,7 +1295,7 @@ ok "Role: security"
 cat > "$PROJECT/site.yml" <<EOF
 ---
 # ============================================================================
-# Server Rebuild Playbook — generated from infrastructure audit
+# Server Rebuild Playbook -- generated from infrastructure audit
 # ============================================================================
 #
 # Usage:
@@ -1310,9 +1327,9 @@ cat > "$PROJECT/site.yml" <<EOF
           - ansible_facts['distribution'] == "Debian"
         fail_msg: "This playbook is designed for Debian. Found: {{ ansible_facts['distribution'] }}"
 
-    # ─── LOCKOUT PROTECTION PRE-FLIGHT ────────────────────────────────────
+    # --- LOCKOUT PROTECTION PRE-FLIGHT ------------------------------------
     # Verify the bootstrap user really has sudo before we make any changes.
-    # If they don't, abort BEFORE any role runs — otherwise the play could
+    # If they don't, abort BEFORE any role runs -- otherwise the play could
     # leave the box in a state where we can't reconnect to fix it.
     - name: "Lockout protection: confirm bootstrap_user exists"
       ansible.builtin.getent:
@@ -1323,7 +1340,7 @@ cat > "$PROJECT/site.yml" <<EOF
     - name: "Lockout protection: warn if deploying old sshd_config or sudoers"
       ansible.builtin.debug:
         msg: |
-          ⚠️  WARNING — DANGEROUS OPTIONS ENABLED ⚠️
+          ⚠️  WARNING -- DANGEROUS OPTIONS ENABLED ⚠️
           deploy_old_sudoers     = {{ deploy_old_sudoers }}
           deploy_old_sshd_config = {{ deploy_old_sshd_config }}
           These can lock you out. Make sure you have console access to
@@ -1375,7 +1392,7 @@ EOF
 ok "ansible.cfg"
 
 # ============================================================================
-#  REQUIREMENTS.YML — collections needed by the playbook
+#  REQUIREMENTS.YML -- collections needed by the playbook
 # ============================================================================
 
 cat > "$PROJECT/requirements.yml" <<EOF
@@ -1395,7 +1412,7 @@ ok "requirements.yml"
 # ============================================================================
 
 cat > "$PROJECT/README.md" <<'EOF'
-# Server Rebuild — Ansible Project
+# Server Rebuild -- Ansible Project
 
 Auto-generated from a server infrastructure audit.
 
@@ -1426,13 +1443,13 @@ ansible-playbook -i inventory/hosts.ini site.yml --tags docker,vpn
 
 ## What to review before running
 
-1. **`group_vars/rebuild.yml`** — server hostname, timezone, VPN backend choice
-2. **`roles/base-packages/defaults/main.yml`** — package list (check for Debian 13 renames)
-3. **`roles/networking/templates/`** — IP addresses will differ on the new server
-4. **`roles/firewall/defaults/main.yml`** — verify UFW rules make sense
-5. **`roles/vpn/defaults/main.yml`** — choose `openvpn` or `wireguard`
-6. **`roles/docker/`** — you'll need to transfer compose files, volumes, and .env files manually
-7. **`roles/cron/`** — verify script paths exist on the new server
+1. **`group_vars/rebuild.yml`** -- server hostname, timezone, VPN backend choice
+2. **`roles/base-packages/defaults/main.yml`** -- package list (check for Debian 13 renames)
+3. **`roles/networking/templates/`** -- IP addresses will differ on the new server
+4. **`roles/firewall/defaults/main.yml`** -- verify UFW rules make sense
+5. **`roles/vpn/defaults/main.yml`** -- choose `openvpn` or `wireguard`
+6. **`roles/docker/`** -- you'll need to transfer compose files, volumes, and .env files manually
+7. **`roles/cron/`** -- verify script paths exist on the new server
 
 ## VPN Migration (OpenVPN → WireGuard)
 
@@ -1446,20 +1463,20 @@ your old OpenVPN config and the new WireGuard setup.
 
 ```
 ansible-rebuild/
-├── ansible.cfg
-├── requirements.yml            # Required Ansible collections
-├── inventory/hosts.ini          # Target server(s)
-├── group_vars/rebuild.yml       # Shared variables
-├── site.yml                     # Main playbook
-└── roles/
-    ├── base-packages/           # APT packages, timezone, hostname
-    ├── users/                   # Users, SSH keys, sudoers
-    ├── networking/              # Network interfaces, DNS, hosts
-    ├── firewall/                # UFW / iptables / nftables
-    ├── security/                # fail2ban, sysctl, unattended-upgrades
-    ├── docker/                  # Docker CE, compose projects
-    ├── vpn/                     # OpenVPN or WireGuard
-    └── cron/                    # Cron jobs, scripts
+├-- ansible.cfg
+├-- requirements.yml            # Required Ansible collections
+├-- inventory/hosts.ini          # Target server(s)
+├-- group_vars/rebuild.yml       # Shared variables
+├-- site.yml                     # Main playbook
+└-- roles/
+    ├-- base-packages/           # APT packages, timezone, hostname
+    ├-- users/                   # Users, SSH keys, sudoers
+    ├-- networking/              # Network interfaces, DNS, hosts
+    ├-- firewall/                # UFW / iptables / nftables
+    ├-- security/                # fail2ban, sysctl, unattended-upgrades
+    ├-- docker/                  # Docker CE, compose projects
+    ├-- vpn/                     # OpenVPN or WireGuard
+    └-- cron/                    # Cron jobs, scripts
 ```
 EOF
 
@@ -1480,8 +1497,8 @@ echo ""
 echo -e "${YELLOW}  NEXT STEPS:${NC}"
 echo "    1.  cd $PROJECT"
 echo "    2.  ansible-galaxy collection install -r requirements.yml"
-echo "    3.  Edit inventory/hosts.ini — set the new server's IP"
-echo "    4.  Edit group_vars/rebuild.yml — set vpn_backend, review settings"
+echo "    3.  Edit inventory/hosts.ini -- set the new server's IP"
+echo "    4.  Edit group_vars/rebuild.yml -- set vpn_backend, review settings"
 echo "    5.  Review each role's defaults/main.yml"
 echo "    6.  ansible-playbook site.yml --check --diff   (dry run)"
 echo "    7.  ansible-playbook site.yml                  (deploy!)"
